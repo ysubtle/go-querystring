@@ -368,7 +368,7 @@ func reflectValueAmazon(values url.Values, val reflect.Value, scope string) erro
 		}
 
 		if sv.Kind() == reflect.Struct {
-			reflectValue(values, sv, name)
+			reflectValueAmazon(values, sv, name)
 			continue
 		}
 
