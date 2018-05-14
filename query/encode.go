@@ -132,6 +132,28 @@ func Values(v interface{}) (url.Values, error) {
 	return values, err
 }
 
+func ValuesAmazon(v interface{}) (url.Values, error) {
+	values := make(url.Values)
+	val := reflect.ValueOf(v)
+	for val.Kind() == reflect.Ptr {
+		if val.IsNil() {
+			return values, nil
+		}
+		val = val.Elem()
+	}
+
+	if v == nil {
+		return values, nil
+	}
+
+	if val.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("query: Values() expects struct input. Got %v", val.Kind())
+	}
+
+	err := reflectValueAmazon(values, val, "")
+	return values, err
+}
+
 // reflectValue populates the values parameter from the struct fields in val.
 // Embedded structs are followed recursively (using the rules defined in the
 // Values function documentation) breadth-first.
@@ -239,6 +261,122 @@ func reflectValue(values url.Values, val reflect.Value, scope string) error {
 
 	for _, f := range embedded {
 		if err := reflectValue(values, f, scope); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// reflectValue populates the values parameter from the struct fields in val.
+// Embedded structs are followed recursively (using the rules defined in the
+// Values function documentation) breadth-first.
+func reflectValueAmazon(values url.Values, val reflect.Value, scope string) error {
+	var embedded []reflect.Value
+
+	typ := val.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		sf := typ.Field(i)
+		if sf.PkgPath != "" && !sf.Anonymous { // unexported
+			continue
+		}
+
+		sv := val.Field(i)
+		tag := sf.Tag.Get("url")
+		if tag == "-" {
+			continue
+		}
+		name, opts := parseTag(tag)
+		if name == "" {
+			if sf.Anonymous && sv.Kind() == reflect.Struct {
+				// save embedded struct for later processing
+				embedded = append(embedded, sv)
+				continue
+			}
+
+			name = sf.Name
+		}
+
+		if scope != "" {
+			name = scope + "." + name
+		}
+
+		if opts.Contains("omitempty") && isEmptyValue(sv) {
+			continue
+		}
+
+		if sv.Type().Implements(encoderType) {
+			if !reflect.Indirect(sv).IsValid() {
+				sv = reflect.New(sv.Type().Elem())
+			}
+
+			m := sv.Interface().(Encoder)
+			if err := m.EncodeValues(name, &values); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if sv.Kind() == reflect.Slice || sv.Kind() == reflect.Array {
+			var del byte
+			if opts.Contains("comma") {
+				del = ','
+			} else if opts.Contains("space") {
+				del = ' '
+			} else if opts.Contains("semicolon") {
+				del = ';'
+			} else if opts.Contains("brackets") {
+				name = name + "[]"
+			} else if opts.Contains("amazon") {
+				name = name + ".member."
+			}
+
+			if del != 0 {
+				s := new(bytes.Buffer)
+				first := true
+				for i := 0; i < sv.Len(); i++ {
+					if first {
+						first = false
+					} else {
+						s.WriteByte(del)
+					}
+					s.WriteString(valueString(sv.Index(i), opts))
+				}
+				values.Add(name, s.String())
+			} else {
+				for i := 0; i < sv.Len(); i++ {
+					k := name
+					if opts.Contains("numbered") {
+						k = fmt.Sprintf("%s%d", name, i)
+					}
+					values.Add(k, valueString(sv.Index(i), opts))
+				}
+			}
+			continue
+		}
+
+		for sv.Kind() == reflect.Ptr {
+			if sv.IsNil() {
+				break
+			}
+			sv = sv.Elem()
+		}
+
+		if sv.Type() == timeType {
+			values.Add(name, valueString(sv, opts))
+			continue
+		}
+
+		if sv.Kind() == reflect.Struct {
+			reflectValue(values, sv, name)
+			continue
+		}
+
+		values.Add(name, valueString(sv, opts))
+	}
+
+	for _, f := range embedded {
+		if err := reflectValueAmazon(values, f, scope); err != nil {
 			return err
 		}
 	}
