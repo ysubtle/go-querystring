@@ -349,7 +349,7 @@ func reflectValueAmazon(values url.Values, val reflect.Value, scope string) erro
 					if opts.Contains("numbered") {
 						k = fmt.Sprintf("%s.member.%d", name, i)
 					}
-					reflectValueAmazon(values, sv, k)
+					reflectValueAmazon(values, sv.Index(i), k)
 					//values.Add(k, valueString(sv.Index(i), opts))
 				}
 			}
