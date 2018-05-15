@@ -347,7 +347,7 @@ func reflectValueAmazon(values url.Values, val reflect.Value, scope string) erro
 				for i := 0; i < sv.Len(); i++ {
 					k := name
 					if opts.Contains("numbered") {
-						k = fmt.Sprintf("%s.member.%d", name, i)
+						k = fmt.Sprintf("%s.member.%d", name, i+1)
 					}
 					reflectValueAmazon(values, sv.Index(i), k)
 					//values.Add(k, valueString(sv.Index(i), opts))
